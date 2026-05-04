@@ -318,8 +318,8 @@ public class OutputDescriptorTest {
         Wallet wallet = outputDescriptor.toWallet();
         Assertions.assertEquals(PolicyType.SINGLE_SP, wallet.getPolicyType());
         Assertions.assertEquals(ScriptType.P2TR, wallet.getScriptType());
-        Assertions.assertNotNull(wallet.getKeystores().getFirst().getSilentPaymentScanAddress());
-        Assertions.assertArrayEquals(scanKey.getPrivKeyBytes(), wallet.getKeystores().getFirst().getSilentPaymentScanAddress().getScanKey().getPrivKeyBytes());
+        Assertions.assertNotNull(wallet.getSilentPaymentScanAddress());
+        Assertions.assertArrayEquals(scanKey.getPrivKeyBytes(), wallet.getSilentPaymentScanAddress().getScanKey().getPrivKeyBytes());
     }
 
     @Test

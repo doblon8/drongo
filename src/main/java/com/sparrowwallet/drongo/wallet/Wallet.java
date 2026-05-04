@@ -328,6 +328,18 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
         return getKeystores().size() == 1 && (policyType == PolicyType.SINGLE_HD || policyType == PolicyType.SINGLE_SP) && SilentPayment.VALID_INPUT_SCRIPT_TYPES.contains(scriptType);
     }
 
+    public boolean hasSilentPaymentScanAddress() {
+        return getKeystores().size() == 1 && policyType == PolicyType.SINGLE_SP && keystores.getFirst().getSilentPaymentScanAddress() != null;
+    }
+
+    public SilentPaymentScanAddress getSilentPaymentScanAddress() {
+        if(hasSilentPaymentScanAddress()) {
+            return getKeystores().getFirst().getSilentPaymentScanAddress();
+        }
+
+        return null;
+    }
+
     public StandardAccount getStandardAccountType() {
         int accountIndex = getAccountIndex();
         return Arrays.stream(StandardAccount.values()).filter(standardAccount -> standardAccount.getChildNumber().num() == accountIndex).findFirst().orElse(null);
@@ -1093,7 +1105,7 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
             for(int i = 1; i < numSets; i+=2) {
                 Payment fakeMixPayment;
                 if(policyType == PolicyType.SINGLE_SP) {
-                    SilentPaymentAddress spChangeAddress = getKeystores().getFirst().getSilentPaymentScanAddress().getChangeAddress().getSilentPaymentAddress();
+                    SilentPaymentAddress spChangeAddress = getSilentPaymentScanAddress().getChangeAddress().getSilentPaymentAddress();
                     fakeMixPayment = new SilentPayment(spChangeAddress, "(Fake Mix)", totalPaymentAmount, false);
                 } else {
                     WalletNode mixNode = getFreshNode(getChangeKeyPurpose());
@@ -1180,7 +1192,7 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
                 Map<WalletNode, Long> changeMap = new LinkedHashMap<>();
                 setChangeAmts = getSetChangeAmounts(selectedUtxoSets, totalPaymentAmount, changeFeeRequiredAmt);
                 if(policyType == PolicyType.SINGLE_SP) {
-                    SilentPaymentAddress spChangeAddress = getKeystores().getFirst().getSilentPaymentScanAddress().getChangeAddress().getSilentPaymentAddress();
+                    SilentPaymentAddress spChangeAddress = getSilentPaymentScanAddress().getChangeAddress().getSilentPaymentAddress();
                     for(Long setChangeAmt : setChangeAmts) {
                         TransactionOutput output = transaction.addOutput(setChangeAmt, new Script(new byte[0]));
                         SilentPayment changeSilentPayment = new SilentPayment(spChangeAddress, null, setChangeAmt, false);
