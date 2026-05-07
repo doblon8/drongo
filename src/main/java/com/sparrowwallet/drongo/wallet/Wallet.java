@@ -1104,15 +1104,15 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
 
             for(int i = 1; i < numSets; i+=2) {
                 Payment fakeMixPayment;
+                Payment.Type type = Payment.Type.FAKE_MIX;
                 if(policyType == PolicyType.SINGLE_SP) {
                     SilentPaymentAddress spChangeAddress = getSilentPaymentScanAddress().getChangeAddress().getSilentPaymentAddress();
-                    fakeMixPayment = new SilentPayment(spChangeAddress, "(Fake Mix)", totalPaymentAmount, false);
+                    fakeMixPayment = new SilentPayment(spChangeAddress, "(" + type.toDisplayString() + ")", totalPaymentAmount, false, type);
                 } else {
                     WalletNode mixNode = getFreshNode(getChangeKeyPurpose());
                     txExcludedChangeNodes.add(mixNode);
-                    fakeMixPayment = new WalletNodePayment(mixNode, ".." + mixNode + " (Fake Mix)", totalPaymentAmount, false);
+                    fakeMixPayment = new WalletNodePayment(mixNode, ".." + mixNode + " (" + type.toDisplayString() + ")", totalPaymentAmount, false, type);
                 }
-                fakeMixPayment.setType(Payment.Type.FAKE_MIX);
                 txPayments.add(fakeMixPayment);
             }
 
@@ -1120,7 +1120,11 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
             for(Payment payment : txPayments) {
                 if(payment instanceof SilentPayment silentPayment) {
                     TransactionOutput output = transaction.addOutput(payment.getAmount(), new Script(new byte[0]));
-                    outputs.add(new WalletTransaction.SilentPaymentOutput(output, silentPayment));
+                    if(policyType == PolicyType.SINGLE_SP && getSilentPaymentScanAddress().getSilentPaymentAddress().equals(silentPayment.getSilentPaymentAddress())) {
+                        outputs.add(new WalletTransaction.SilentPaymentConsolidationOutput(output, silentPayment));
+                    } else {
+                        outputs.add(new WalletTransaction.SilentPaymentOutput(output, silentPayment));
+                    }
                 } else if(payment instanceof WalletNodePayment walletNodePayment) {
                     TransactionOutput output = transaction.addOutput(payment.getAmount(), payment.getAddress());
                     outputs.add(new WalletTransaction.ConsolidationOutput(output, walletNodePayment, payment.getAmount()));
@@ -1172,13 +1176,15 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
                 continue;
             }
 
-            //Determine if a change output is required by checking if its value is greater than its dust threshold
+            //Determine if a change output is required by checking if its value exceeds both the cost of change and the relay dust threshold
             List<Long> setChangeAmts = getSetChangeAmounts(selectedUtxoSets, totalPaymentAmount, noChangeFeeRequiredAmt);
             double noChangeFeeRate = (params.fee() == null ? params.feeRate() : noChangeFeeRequiredAmt / transaction.getVirtualSize());
+            TransactionOutput changeOutput = new TransactionOutput(transaction, setChangeAmts.getFirst(), getNode(KeyPurpose.CHANGE).getOutputScript());
             long costOfChangeAmt = getCostOfChange(noChangeFeeRate, params.longTermFeeRate());
-            if(setChangeAmts.stream().allMatch(amt -> amt > costOfChangeAmt) || (numSets > 1 && differenceAmt / transaction.getVirtualSize() > noChangeFeeRate * 2)) {
+            long dustThresholdAmt = getDustThreshold(changeOutput, Transaction.DUST_RELAY_TX_FEE);
+            long minChangeAmt = Math.max(costOfChangeAmt, dustThresholdAmt);
+            if(setChangeAmts.stream().allMatch(amt -> amt > minChangeAmt) || (numSets > 1 && differenceAmt / transaction.getVirtualSize() > noChangeFeeRate * 2)) {
                 //Change output is required, determine new fee once change output has been added
-                TransactionOutput changeOutput = new TransactionOutput(transaction, setChangeAmts.getFirst(), getNode(KeyPurpose.CHANGE).getOutputScript());
                 double changeVSize = noChangeVSize + changeOutput.getLength() * numSets;
                 long changeFeeRequiredAmt = params.getRequiredFeeAmount(changeVSize);
                 if(params.isMinRelayRate()) {
@@ -1211,7 +1217,7 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
                     }
                 }
 
-                if(setChangeAmts.stream().anyMatch(amt -> amt < costOfChangeAmt)) {
+                if(setChangeAmts.stream().anyMatch(amt -> amt < minChangeAmt)) {
                     //The new fee has meant that one of the change outputs is now dust. We pay too high a fee without change, but change is dust when added.
                     if(numSets > 1 && differenceAmt / transaction.getVirtualSize() < noChangeFeeRate * 2) {
                         //Maximize privacy. Pay a higher fee to keep multiple output sets.

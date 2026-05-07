@@ -16,8 +16,16 @@ public class SilentPayment extends Payment {
         this(silentPaymentAddress, getDummyAddress(), label, amount, sendMax);
     }
 
+    public SilentPayment(SilentPaymentAddress silentPaymentAddress, String label, long amount, boolean sendMax, Type type) {
+        this(silentPaymentAddress, getDummyAddress(), label, amount, sendMax, type);
+    }
+
     public SilentPayment(SilentPaymentAddress silentPaymentAddress, Address address, String label, long amount, boolean sendMax) {
-        super(address == null ? getDummyAddress() : address, label, amount, sendMax, Type.DEFAULT);
+        this(silentPaymentAddress, address, label, amount, sendMax, Type.DEFAULT);
+    }
+
+    public SilentPayment(SilentPaymentAddress silentPaymentAddress, Address address, String label, long amount, boolean sendMax, Type type) {
+        super(address == null ? getDummyAddress() : address, label, amount, sendMax, type);
         this.silentPaymentAddress = silentPaymentAddress;
     }
 

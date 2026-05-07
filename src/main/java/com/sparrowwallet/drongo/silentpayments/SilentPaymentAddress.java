@@ -67,7 +67,7 @@ public class SilentPaymentAddress {
 
     public String toAbbreviatedString() {
         String address = toString();
-        return address.substring(0, 50) + "...";
+        return address.substring(0, 24) + "..." +  address.substring(address.length() - 24);
     }
 
     @Override
