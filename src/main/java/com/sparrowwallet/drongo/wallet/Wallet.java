@@ -1588,7 +1588,7 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
                 WalletNode signingNode = walletOutputScripts.get(scriptPubKey);
 
                 // BIP32-derivation fallback for inputs beyond the wallet's derived address range
-                if(signingNode == null && useDerivationFallback) {
+                if(signingNode == null && useDerivationFallback && policyType != PolicyType.SINGLE_SP) {
                     signingNode = getSigningNodeFromDerivation(psbtInput, scriptPubKey);
                 }
 
@@ -1697,6 +1697,10 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
     }
 
     public Integer getRequiredGapLimit(PSBT psbt) {
+        if(policyType == PolicyType.SINGLE_SP) {
+            return null;
+        }
+
         Wallet copy = this.copy();
         for(KeyPurpose keyPurpose : KeyPurpose.DEFAULT_PURPOSES) {
             WalletNode purposeNode = copy.getNode(keyPurpose);

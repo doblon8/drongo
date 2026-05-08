@@ -321,4 +321,86 @@ public class WalletTest {
         Address result = wallet.getAddress(node);
         Assertions.assertEquals(expectedAddress, result);
     }
+
+    @Test
+    public void testFillToIndexNoOpForSp() {
+        Wallet wallet = new Wallet();
+        wallet.setPolicyType(PolicyType.SINGLE_SP);
+        wallet.setScriptType(ScriptType.P2TR);
+
+        WalletNode purposeNode = wallet.getNode(KeyPurpose.RECEIVE);
+        Assertions.assertTrue(purposeNode.getChildren().isEmpty());
+        Assertions.assertTrue(purposeNode.fillToIndex(10).isEmpty());
+        Assertions.assertTrue(purposeNode.getChildren().isEmpty());
+    }
+
+    @Test
+    public void testAddSilentPaymentChildSetsTweak() {
+        Wallet wallet = buildValidSpWallet();
+        WalletNode purposeNode = wallet.getNode(KeyPurpose.RECEIVE);
+
+        byte[] tweak = Utils.hexToBytes("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4");
+        WalletNode addressNode = purposeNode.addSilentPaymentChild(wallet, 0, tweak);
+
+        Assertions.assertArrayEquals(tweak, addressNode.getSilentPaymentTweak());
+        Assertions.assertEquals(1, purposeNode.getChildren().size());
+        Assertions.assertNotNull(wallet.getAddress(addressNode));
+    }
+
+    @Test
+    public void testAddSilentPaymentChildReturnsNullOnDuplicateIndex() {
+        Wallet wallet = buildValidSpWallet();
+        WalletNode purposeNode = wallet.getNode(KeyPurpose.RECEIVE);
+
+        byte[] firstTweak = Utils.hexToBytes("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4");
+        byte[] secondTweak = Utils.hexToBytes("d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5");
+
+        WalletNode first = purposeNode.addSilentPaymentChild(wallet, 0, firstTweak);
+        WalletNode duplicate = purposeNode.addSilentPaymentChild(wallet, 0, secondTweak);
+
+        Assertions.assertNull(duplicate);
+        Assertions.assertEquals(1, purposeNode.getChildren().size());
+        Assertions.assertArrayEquals(firstTweak, first.getSilentPaymentTweak());
+    }
+
+    @Test
+    public void testAddSilentPaymentChildAttachesDetachedLabel() {
+        Wallet wallet = buildValidSpWallet();
+        WalletNode purposeNode = wallet.getNode(KeyPurpose.RECEIVE);
+
+        byte[] tweak = Utils.hexToBytes("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4");
+
+        // Pre-compute the address the new node will resolve to and stash a detached label for it
+        WalletNode probe = new WalletNode(wallet, KeyPurpose.RECEIVE, 0);
+        probe.setSilentPaymentTweak(tweak);
+        String expectedAddress = wallet.getAddress(probe).toString();
+        wallet.getDetachedLabels().put(expectedAddress, "Restored label");
+
+        WalletNode addressNode = purposeNode.addSilentPaymentChild(wallet, 0, tweak);
+
+        Assertions.assertEquals("Restored label", addressNode.getLabel());
+        Assertions.assertFalse(wallet.getDetachedLabels().containsKey(expectedAddress));
+    }
+
+    @Test
+    public void testRequiredGapLimitNullForSp() {
+        Wallet wallet = buildValidSpWallet();
+        Assertions.assertNull(wallet.getRequiredGapLimit(null));
+    }
+
+    private Wallet buildValidSpWallet() {
+        ECKey scanKey = ECKey.fromPrivate(Utils.hexToBytes("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"));
+        ECKey spendKey = ECKey.fromPrivate(Utils.hexToBytes("b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3"));
+        SilentPaymentScanAddress spAddr = new SilentPaymentScanAddress(scanKey, ECKey.fromPublicOnly(spendKey));
+
+        Wallet wallet = new Wallet();
+        wallet.setPolicyType(PolicyType.SINGLE_SP);
+        wallet.setScriptType(ScriptType.P2TR);
+        Keystore keystore = new Keystore();
+        keystore.setSilentPaymentScanAddress(spAddr);
+        keystore.setKeyDerivation(new KeyDerivation("deadbeef", "m/352'/0'/0'"));
+        wallet.getKeystores().add(keystore);
+        wallet.setDefaultPolicy(Policy.getPolicy(PolicyType.SINGLE_SP, ScriptType.P2TR, wallet.getKeystores(), 1));
+        return wallet;
+    }
 }

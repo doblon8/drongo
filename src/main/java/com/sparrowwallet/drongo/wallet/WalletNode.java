@@ -5,6 +5,7 @@ import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.crypto.ChildNumber;
 import com.sparrowwallet.drongo.crypto.ECKey;
+import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.protocol.Script;
 
 import java.util.*;
@@ -233,6 +234,10 @@ public class WalletNode extends Persistable implements Comparable<WalletNode> {
     }
 
     public synchronized Set<WalletNode> fillToIndex(int index) {
+        if(wallet.getPolicyType() == PolicyType.SINGLE_SP) {
+            return Collections.emptySet();
+        }
+
         //Optimization to check if child nodes already monotonically increment to the desired index
         int indexCheck = 0;
         for(WalletNode childNode : getChildren()) {
@@ -256,6 +261,25 @@ public class WalletNode extends Persistable implements Comparable<WalletNode> {
         }
 
         return newNodes;
+    }
+
+    public synchronized WalletNode addSilentPaymentChild(Wallet wallet, int index, byte[] tweak) {
+        if(children.stream().anyMatch(n -> n.getIndex() == index)) {
+            return null;
+        }
+
+        WalletNode node = new WalletNode(wallet, getKeyPurpose(), index);
+        node.setSilentPaymentTweak(tweak);
+        children.add(node);
+
+        if(wallet.isValid() && !wallet.getDetachedLabels().isEmpty()) {
+            String label = wallet.getDetachedLabels().remove(node.getAddress().toString());
+            if(label != null && (node.getLabel() == null || node.getLabel().isEmpty())) {
+                node.setLabel(label);
+            }
+        }
+
+        return node;
     }
 
     /**
