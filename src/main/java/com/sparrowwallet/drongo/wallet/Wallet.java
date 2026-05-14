@@ -601,6 +601,20 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
         this.birthHeight = birthHeight;
     }
 
+    public int getNeededScanStart() {
+        if(storedBlockHeight != null && storedBlockHeight > 0) {
+            return Math.max(0, storedBlockHeight - BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM);
+        }
+        if(birthHeight != null) {
+            return Math.max(0, birthHeight - BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM);
+        }
+        if(birthDate != null) {
+            return (int)(birthDate.getTime() / 1000L);
+        }
+
+        return 0;
+    }
+
     public boolean isMasterWallet() {
         return masterWallet == null;
     }
