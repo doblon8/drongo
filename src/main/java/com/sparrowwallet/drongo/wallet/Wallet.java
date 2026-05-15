@@ -1774,6 +1774,16 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
     }
 
     public void sign(PSBT psbt) throws MnemonicException {
+        if(psbt.getPsbtOutputs().stream().anyMatch(o -> o.getSilentPaymentAddress() != null)) {
+            List<PSBTInput> psbtInputs = psbt.getPsbtInputs();
+            for(int i = 0; i < psbtInputs.size(); i++) {
+                SigHash inputSigHash = psbtInputs.get(i).getSigHash();
+                if(inputSigHash != null && inputSigHash != SigHash.ALL && inputSigHash != SigHash.DEFAULT) {
+                    throw new IllegalStateException("Silent payment outputs require SIGHASH_ALL/DEFAULT signatures. Input at index " + i + " has sighash type: " + inputSigHash);
+                }
+            }
+        }
+
         sign(getSigningNodes(psbt));
     }
 
