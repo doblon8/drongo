@@ -497,21 +497,24 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
     }
 
     public SilentPaymentAddress getSilentPaymentAddress(Address address) {
-        return silentPaymentAddresses.get(address);
+        return resolveMasterWallet().silentPaymentAddresses.get(address);
     }
 
-    private void addSilentPaymentAddress(Address address, SilentPaymentAddress silentPaymentAddress) {
-        silentPaymentAddresses.put(address, silentPaymentAddress);
+    public void addSilentPaymentAddress(Address address, SilentPaymentAddress silentPaymentAddress) {
+        resolveMasterWallet().silentPaymentAddresses.put(address, silentPaymentAddress);
+    }
+
+    public Map<Address, SilentPaymentAddress> getSilentPaymentAddresses() {
+        return resolveMasterWallet().silentPaymentAddresses;
     }
 
     public void clearSilentPaymentAddress(Address address) {
-        silentPaymentAddresses.remove(address);
+        resolveMasterWallet().silentPaymentAddresses.remove(address);
     }
 
     public boolean isSilentPaymentsTransaction(BlockTransaction blockTransaction) {
-        Wallet wallet = isNested() ? getMasterWallet() : this;
         return blockTransaction.getTransaction().getOutputs().stream().map(output -> output.getScript().getToAddress())
-                .filter(Objects::nonNull).anyMatch(address -> wallet.getSilentPaymentAddress(address) != null);
+                .filter(Objects::nonNull).anyMatch(address -> getSilentPaymentAddress(address) != null);
     }
 
     public boolean isSafeToAddInputsOrOutputs(BlockTransaction blockTransaction) {
@@ -625,6 +628,10 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
 
     public void setMasterWallet(Wallet masterWallet) {
         this.masterWallet = masterWallet;
+    }
+
+    public Wallet resolveMasterWallet() {
+        return isNested() ? getMasterWallet() : this;
     }
 
     public Wallet getChildWallet(String name) {
@@ -1834,7 +1841,6 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
 
                 Script outputScript = silentPayment.getAddress().getOutputScript();
                 silentOutput.setScript(outputScript);
-                addSilentPaymentAddress(silentPayment.getAddress(), silentPayment.getSilentPaymentAddress());
             }
 
             return silentPayments;

@@ -94,4 +94,17 @@ public class SilentPaymentAddress {
         buffer.put(spendAddress.getPubKey());
         return buffer.array();
     }
+
+    public static SilentPaymentAddress fromBytes(byte[] bytes) {
+        if(bytes.length != 67) {
+            throw new IllegalArgumentException("Silent payment address must be 67 bytes");
+        }
+        int version = bytes[0] & 0xff;
+        if(version != VERSION) {
+            throw new UnsupportedOperationException("Unsupported silent payments address version " + version);
+        }
+        ECKey scanPubKey = ECKey.fromPublicOnly(Arrays.copyOfRange(bytes, 1, 34));
+        ECKey spendPubKey = ECKey.fromPublicOnly(Arrays.copyOfRange(bytes, 34, 67));
+        return new SilentPaymentAddress(scanPubKey, spendPubKey);
+    }
 }
