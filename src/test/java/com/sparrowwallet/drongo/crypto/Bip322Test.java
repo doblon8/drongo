@@ -168,6 +168,48 @@ public class Bip322Test {
     }
 
     @Test
+    public void signMessageBip322Sp() throws SignatureException {
+        ECKey spendPrivKey = DumpedPrivateKey.fromBase58("L3VFeEujGtevx9w18HD1fhRbCH67Az2dpCymeRE1SoPK6XQtaN2k").getKey();
+        byte[] tweak = Utils.hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+
+        ECKey spendPubKey = ECKey.fromPublicOnly(spendPrivKey);
+        ECKey tweakPoint = ECKey.fromPublicOnly(ECKey.fromPrivate(tweak));
+        ECKey outputKey = spendPubKey.add(tweakPoint, true);
+        Address address = ScriptType.P2TR.getAddress(PolicyType.SINGLE_SP, outputKey);
+
+        String signature = Bip322.signMessageBip322Sp(address, "Hello World", spendPrivKey, tweak);
+        Assertions.assertTrue(Bip322.verifyMessageBip322(ScriptType.P2TR, address, "Hello World", signature));
+
+        //An SP signature for the same key but a different tweak must not verify against the first address
+        byte[] tweak2 = Utils.hexToBytes("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210");
+        ECKey tweakPoint2 = ECKey.fromPublicOnly(ECKey.fromPrivate(tweak2));
+        ECKey outputKey2 = spendPubKey.add(tweakPoint2, true);
+        Address address2 = ScriptType.P2TR.getAddress(PolicyType.SINGLE_SP, outputKey2);
+        String signature2 = Bip322.signMessageBip322Sp(address2, "Hello World", spendPrivKey, tweak2);
+        Assertions.assertTrue(Bip322.verifyMessageBip322(ScriptType.P2TR, address2, "Hello World", signature2));
+        Assertions.assertFalse(Bip322.verifyMessageBip322(ScriptType.P2TR, address, "Hello World", signature2));
+    }
+
+    @Test
+    public void getBip322PsbtSp() {
+        ECKey spendPrivKey = DumpedPrivateKey.fromBase58("L3VFeEujGtevx9w18HD1fhRbCH67Az2dpCymeRE1SoPK6XQtaN2k").getKey();
+        byte[] tweak = Utils.hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+
+        ECKey spendPubKey = ECKey.fromPublicOnly(spendPrivKey);
+        ECKey tweakPoint = ECKey.fromPublicOnly(ECKey.fromPrivate(tweak));
+        ECKey outputKey = spendPubKey.add(tweakPoint, true);
+        Address address = ScriptType.P2TR.getAddress(PolicyType.SINGLE_SP, outputKey);
+
+        PSBT psbt = Bip322.getBip322PsbtSp(address, "Hello World", tweak, java.util.Collections.emptyMap());
+        Assertions.assertEquals(1, psbt.getPsbtInputs().size());
+        PSBTInput psbtInput = psbt.getPsbtInputs().get(0);
+        Assertions.assertNotNull(psbtInput.getWitnessUtxo());
+        Assertions.assertArrayEquals(tweak, psbtInput.getSilentPaymentsTweak());
+        Assertions.assertNull(psbtInput.getTapInternalKey());
+        Assertions.assertTrue(psbtInput.getTapDerivedPublicKeys().isEmpty());
+    }
+
+    @Test
     public void verifyMessageBip322Multisig() throws SignatureException, InvalidAddressException {
         Address address = Address.fromString("bc1ppv609nr0vr25u07u95waq5lucwfm6tde4nydujnu8npg4q75mr5sxq8lt3");
 

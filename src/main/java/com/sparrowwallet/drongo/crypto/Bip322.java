@@ -1,5 +1,6 @@
 package com.sparrowwallet.drongo.crypto;
 
+import com.sparrowwallet.drongo.KeyDerivation;
 import com.sparrowwallet.drongo.Utils;
 import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.policy.PolicyType;
@@ -41,6 +42,46 @@ public class Bip322 {
         psbtInput.setSigHash(SigHash.ALL);
 
         return psbt;
+    }
+
+    public static PSBT getBip322PsbtSp(Address address, String message, byte[] silentPaymentsTweak, Map<ECKey, KeyDerivation> spendDerivations) {
+        if(silentPaymentsTweak == null) {
+            throw new IllegalArgumentException("Silent payments tweak is required");
+        }
+
+        PSBT psbt = getBip322Psbt(P2TR, address, message);
+        PSBTInput psbtInput = psbt.getPsbtInputs().getFirst();
+        psbtInput.setSilentPaymentsTweak(silentPaymentsTweak);
+        if(spendDerivations != null && !spendDerivations.isEmpty()) {
+            psbtInput.getSilentPaymentsSpendDerivations().putAll(spendDerivations);
+        }
+
+        return psbt;
+    }
+
+    public static String signMessageBip322Sp(Address address, String message, ECKey spendPrivKey, byte[] silentPaymentsTweak) {
+        PSBT psbt = getBip322PsbtSp(address, message, silentPaymentsTweak, Collections.emptyMap());
+        PSBTInput psbtInput = psbt.getPsbtInputs().getFirst();
+
+        if(!psbtInput.signSilentPayments(spendPrivKey)) {
+            throw new IllegalStateException("Failed to sign BIP322 PSBT with silent payments tweak");
+        }
+
+        return getBip322SignatureFromPsbtSp(psbt);
+    }
+
+    public static String getBip322SignatureFromPsbtSp(PSBT signedPsbt) {
+        PSBTInput psbtInput = signedPsbt.getPsbtInputs().getFirst();
+        TransactionSignature signature = psbtInput.getTapKeyPathSignature();
+        if(signature == null) {
+            throw new IllegalArgumentException("PSBT does not contain a taproot keypath signature");
+        }
+
+        Transaction finalizeTransaction = new Transaction();
+        TransactionWitness witness = new TransactionWitness(finalizeTransaction, signature);
+        finalizeTransaction.addInput(Sha256Hash.ZERO_HASH, 0, new Script(new byte[0]), witness);
+
+        return Base64.getEncoder().encodeToString(witness.toByteArray());
     }
 
     public static String getBip322SignatureFromPsbt(ScriptType scriptType, PSBT signedPsbt, ECKey pubKey) {
