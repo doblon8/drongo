@@ -1912,10 +1912,78 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
                 psbtInput.setFinalScriptSig(finalizedTxInput.getScriptSig());
                 psbtInput.setFinalScriptWitness(finalizedTxInput.getWitness());
                 psbtInput.clearNonFinalFields();
+            } else if(signingNode == null) {
+                finaliseExternalInput(psbtInput, utxo, signaturesAvailable);
             }
         }
 
         psbt.getPsbtOutputs().forEach(PSBTOutput::clearNonFinalFields);
+    }
+
+    private void finaliseExternalInput(PSBTInput psbtInput, TransactionOutput utxo, int signaturesAvailable) {
+        Script signingScript = psbtInput.getSigningScript();
+        ScriptType inputScriptType = psbtInput.getScriptType();
+        if(signingScript == null || inputScriptType == null) {
+            return;
+        }
+
+        int inputThreshold;
+        try {
+            inputThreshold = signingScript.getNumRequiredSignatures();
+        } catch(NonStandardScriptException e) {
+            return;
+        }
+
+        if(signaturesAvailable < inputThreshold) {
+            return;
+        }
+
+        Transaction transaction = new Transaction();
+        TransactionInput finalizedTxInput;
+
+        if(MULTISIG.isScriptType(signingScript)) {
+            ECKey[] scriptPubKeys = MULTISIG.getPublicKeysFromScript(signingScript);
+            Map<ECKey, TransactionSignature> pubKeySignatures = new TreeMap<>(new ECKey.LexicographicECKeyComparator());
+            for(ECKey pubKey : scriptPubKeys) {
+                pubKeySignatures.put(pubKey, psbtInput.getPartialSignature(pubKey));
+            }
+
+            long matched = pubKeySignatures.values().stream().filter(Objects::nonNull).count();
+            if(matched < inputThreshold) {
+                return;
+            }
+
+            finalizedTxInput = inputScriptType.addMultisigSpendingInput(PolicyType.MULTI_HD, transaction, utxo, inputThreshold, pubKeySignatures);
+        } else if(inputThreshold == 1) {
+            ECKey pubKey;
+            TransactionSignature signature;
+            PolicyType policyType;
+            if(psbtInput.isTaproot()) {
+                //The witness program is the tweaked output key - pass it as SINGLE_SP so getOutputKey does not tweak again
+                policyType = PolicyType.SINGLE_SP;
+                pubKey = P2TR.getPublicKeyFromScript(utxo.getScript());
+                signature = psbtInput.getTapKeyPathSignature();
+            } else if(psbtInput.getPartialSignatures().size() == 1) {
+                policyType = PolicyType.SINGLE_HD;
+                Map.Entry<ECKey, TransactionSignature> entry = psbtInput.getPartialSignatures().entrySet().iterator().next();
+                pubKey = entry.getKey();
+                signature = entry.getValue();
+            } else {
+                return;
+            }
+
+            if(signature == null) {
+                return;
+            }
+
+            finalizedTxInput = inputScriptType.addSpendingInput(policyType, transaction, utxo, pubKey, signature);
+        } else {
+            return;
+        }
+
+        psbtInput.setFinalScriptSig(finalizedTxInput.getScriptSig());
+        psbtInput.setFinalScriptWitness(finalizedTxInput.getWitness());
+        psbtInput.clearNonFinalFields();
     }
 
     public BitcoinUnit getAutoUnit() {

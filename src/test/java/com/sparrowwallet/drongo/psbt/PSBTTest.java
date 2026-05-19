@@ -5,7 +5,11 @@ import com.sparrowwallet.drongo.KeyDerivation;
 import com.sparrowwallet.drongo.Network;
 import com.sparrowwallet.drongo.Utils;
 import com.sparrowwallet.drongo.crypto.ECKey;
+import com.sparrowwallet.drongo.policy.Miniscript;
+import com.sparrowwallet.drongo.policy.Policy;
+import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.protocol.*;
+import com.sparrowwallet.drongo.wallet.Wallet;
 import org.bouncycastle.util.encoders.Hex;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -292,6 +296,109 @@ public class PSBTTest {
         Assertions.assertEquals("00473044022074018ad4180097b873323c0015720b3684cc8123891048e7dbcd9b55ad679c99022073d369b740e3eb53dcefa33823c8070514ca55a7dd9544f157c167913261118c01483045022100f61038b308dc1da865a34852746f015772934208c6d24454393cd99bdf2217770220056e675a675a6d0a02b85b14e5e29074d8a25a9b5760bea2816f661910a006ea01475221029583bf39ae0a609747ad199addd634fa6108559d6c5cd39b4c2183f1ab96e07f2102dab61ff49a14db6a7d02b0cd1fbb78fc4b18312b5b4e54dae4dba2fbfef536d752ae", psbt1.getPsbtInputs().get(0).getFinalScriptSig().getProgramAsHex());
         Assertions.assertEquals("2200208c2353173743b595dfb4a07b72ba8e42e3797da74e87fe7d9d7497e3b2028903", psbt1.getPsbtInputs().get(1).getFinalScriptSig().getProgramAsHex());
         Assertions.assertEquals("0400473044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f01473044022065f45ba5998b59a27ffe1a7bed016af1f1f90d54b3aa8f7450aa5f56a25103bd02207f724703ad1edb96680b284b56d4ffcb88f7fb759eabbe08aa30f29b851383d20147522103089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc21023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e7352ae", Hex.toHexString(psbt1.getPsbtInputs().get(1).getFinalScriptWitness().toByteArray()));
+    }
+
+    @Test
+    public void finaliseExternalMultisigInput() throws PSBTParseException {
+        Network.set(Network.REGTEST);
+        String psbtBase64 = "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";
+
+        PSBT psbt = PSBT.fromString(psbtBase64);
+
+        //Input 0: 2-of-3 P2WSH with both required signatures present
+        //Input 1: 1-of-2 P2WSH with the one required signature present
+        Wallet wallet = new Wallet("test") {
+            @Override
+            public Policy getDefaultPolicy() {
+                return new Policy(new Miniscript("")) {
+                    @Override
+                    public int getNumSignaturesRequired() {
+                        return 1;
+                    }
+                };
+            }
+            @Override
+            public java.util.Map<PSBTInput, com.sparrowwallet.drongo.wallet.WalletNode> getSigningNodes(PSBT psbt) {
+                return java.util.Collections.emptyMap();
+            }
+            @Override
+            public java.util.Map<PSBTInput, com.sparrowwallet.drongo.wallet.WalletNode> getSigningNodes(PSBT psbt, boolean useDerivationFallback) {
+                return java.util.Collections.emptyMap();
+            }
+        };
+        wallet.finalise(psbt);
+
+        Assertions.assertTrue(psbt.isFinalized(), "Both inputs should be finalised");
+
+        String expectedInput0Witness = "04004730440220396b5523e3477e2991b6ff6d43c483211ef7dc27971967384a3f7f74be84dbf502201099ca19a5526cdff6557fa42a0def5b9168535c5855afc14c8388c28b7e1f45014730440220202f28a498aaa34e899fe2823a1a44c49d30bda759bacff335a723d0fb16ff0a02205f99caaaf1d39805840f6df85e1adbfcb23d26547191661c78fe619de8ac4313016952210250ca2af1e0f2552436c66078c24736e0396e36938c421fdbee6f4fe377e5f6af2103622f05e03b50037b7de99a00fe6cd1d0950fbb1e1f462cdff85ff077e57e931d2103cc3bf2cb38bfbf03264b567490ed45cd09f465843b0fc7a8dd1be9b852816e0053ae";
+        String expectedInput1Witness = "030047304402203bd2e54c5897addbd269928e713d8e2d54d87ee0c6d0aafb1d035a876090093f02205da2c24f85993a89bb75c4b92df6a849fa5d0cb915cce8d0c4b1889102e1eba7014751210250ca2af1e0f2552436c66078c24736e0396e36938c421fdbee6f4fe377e5f6af2103cc3bf2cb38bfbf03264b567490ed45cd09f465843b0fc7a8dd1be9b852816e0052ae";
+
+        Assertions.assertEquals(expectedInput0Witness, Hex.toHexString(psbt.getPsbtInputs().get(0).getFinalScriptWitness().toByteArray()));
+        Assertions.assertEquals(expectedInput1Witness, Hex.toHexString(psbt.getPsbtInputs().get(1).getFinalScriptWitness().toByteArray()));
+
+        String expectedTxHex = "02000000000102e21d3ab78e6237c1b292cb1445164efd65cc29a412faee98f9f09649eb96ce140000000000fdffffff24856cca96c4454b7084b3a6311caa23423a8b073de77b3e83f449d40f18bf7b0000000000fdffffff03fc310000000000002200206904cd6d7d5300792afd22c26767a7ceb1f28b062d606d9cdad891fdfc65c8fa950f0f0000000000220020b8ea72fcc41bc87d3d6789e36469e04198addf8f278c871bfa3d6b465fefa2aca1410f0000000000220020b1e82ca86dbf4e706a316691c2888e0ac1cfb7f5e65866fc671835d041af2dca04004730440220396b5523e3477e2991b6ff6d43c483211ef7dc27971967384a3f7f74be84dbf502201099ca19a5526cdff6557fa42a0def5b9168535c5855afc14c8388c28b7e1f45014730440220202f28a498aaa34e899fe2823a1a44c49d30bda759bacff335a723d0fb16ff0a02205f99caaaf1d39805840f6df85e1adbfcb23d26547191661c78fe619de8ac4313016952210250ca2af1e0f2552436c66078c24736e0396e36938c421fdbee6f4fe377e5f6af2103622f05e03b50037b7de99a00fe6cd1d0950fbb1e1f462cdff85ff077e57e931d2103cc3bf2cb38bfbf03264b567490ed45cd09f465843b0fc7a8dd1be9b852816e0053ae030047304402203bd2e54c5897addbd269928e713d8e2d54d87ee0c6d0aafb1d035a876090093f02205da2c24f85993a89bb75c4b92df6a849fa5d0cb915cce8d0c4b1889102e1eba7014751210250ca2af1e0f2552436c66078c24736e0396e36938c421fdbee6f4fe377e5f6af2103cc3bf2cb38bfbf03264b567490ed45cd09f465843b0fc7a8dd1be9b852816e0052aeb4000000";
+        Transaction tx = psbt.extractTransaction();
+        Assertions.assertEquals(expectedTxHex, Hex.toHexString(tx.bitcoinSerialize()));
+    }
+
+    @Test
+    public void finaliseExternalTaprootKeypathInput() {
+        ECKey spendPrivKey = ECKey.fromPrivate(Utils.hexToBytes("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"));
+        ECKey tweakKey = ECKey.fromPrivate(Utils.hexToBytes("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"));
+        byte[] tweak = Utils.bigIntegerToBytes(tweakKey.getPrivKey(), 32);
+
+        ECKey tweakedKey = spendPrivKey.addPrivate(tweakKey);
+        if(tweakedKey.hasOddYCoord()) {
+            tweakedKey = tweakedKey.negatePrivate();
+        }
+        byte[] outputXCoord = tweakedKey.getPubKeyXCoord();
+
+        Transaction prevTx = new Transaction();
+        prevTx.setVersion(2);
+        prevTx.addInput(Sha256Hash.ZERO_HASH, 0, new Script(new byte[0]));
+        prevTx.addOutput(100000L, ScriptType.P2TR.getOutputScript(outputXCoord));
+
+        Transaction spendTx = new Transaction();
+        spendTx.setVersion(2);
+        spendTx.addInput(prevTx.getTxId(), 0, new Script(new byte[0]));
+        spendTx.addOutput(90000L, ScriptType.P2TR.getOutputScript(outputXCoord));
+
+        PSBT psbt = new PSBT(spendTx);
+        psbt.convertVersion(2);
+        psbt.getPsbtInputs().getFirst().setWitnessUtxo(prevTx.getOutputs().getFirst());
+        psbt.getPsbtInputs().getFirst().setSilentPaymentsTweak(tweak);
+        Assertions.assertTrue(psbt.getPsbtInputs().getFirst().signSilentPayments(spendPrivKey));
+
+        TransactionSignature schnorrSig = psbt.getPsbtInputs().getFirst().getTapKeyPathSignature();
+        Assertions.assertNotNull(schnorrSig);
+
+        Wallet wallet = new Wallet("test") {
+            @Override
+            public Policy getDefaultPolicy() {
+                return new Policy(new Miniscript("")) {
+                    @Override
+                    public int getNumSignaturesRequired() {
+                        return 1;
+                    }
+                };
+            }
+            @Override
+            public java.util.Map<PSBTInput, com.sparrowwallet.drongo.wallet.WalletNode> getSigningNodes(PSBT p) {
+                return java.util.Collections.emptyMap();
+            }
+            @Override
+            public java.util.Map<PSBTInput, com.sparrowwallet.drongo.wallet.WalletNode> getSigningNodes(PSBT p, boolean useDerivationFallback) {
+                return java.util.Collections.emptyMap();
+            }
+        };
+        wallet.finalise(psbt);
+
+        Assertions.assertTrue(psbt.isFinalized(), "Taproot keypath input should be finalised");
+        Assertions.assertEquals(0, psbt.getPsbtInputs().getFirst().getFinalScriptSig().getProgram().length);
+
+        TransactionWitness finalWitness = psbt.getPsbtInputs().getFirst().getFinalScriptWitness();
+        Assertions.assertEquals(1, finalWitness.getPushes().size(), "Taproot keypath witness must contain exactly one element (the schnorr signature)");
+        Assertions.assertArrayEquals(schnorrSig.encodeToBitcoin(), finalWitness.getPushes().get(0));
     }
 
     @Test
