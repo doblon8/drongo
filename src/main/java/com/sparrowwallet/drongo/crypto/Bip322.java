@@ -16,6 +16,10 @@ import java.util.*;
 import static com.sparrowwallet.drongo.protocol.ScriptType.P2TR;
 
 public class Bip322 {
+    public static final String SIMPLE_PREFIX = "smp";
+    public static final String FULL_PREFIX = "ful";
+    public static final String FULL_POF_PREFIX = "pof";
+
     public static String signMessageBip322(ScriptType scriptType, String message, ECKey privKey) {
         checkScriptType(scriptType);
 
@@ -37,6 +41,7 @@ public class Bip322 {
         TransactionOutput utxoOutput = toSpend.getOutputs().getFirst();
 
         PSBT psbt = new PSBT(toSign);
+        psbt.setGenericSignedMessage(message);
         PSBTInput psbtInput = psbt.getPsbtInputs().getFirst();
         psbtInput.setWitnessUtxo(utxoOutput);
         psbtInput.setSigHash(SigHash.ALL);
@@ -81,7 +86,7 @@ public class Bip322 {
         TransactionWitness witness = new TransactionWitness(finalizeTransaction, signature);
         finalizeTransaction.addInput(Sha256Hash.ZERO_HASH, 0, new Script(new byte[0]), witness);
 
-        return Base64.getEncoder().encodeToString(witness.toByteArray());
+        return SIMPLE_PREFIX + Base64.getEncoder().encodeToString(witness.toByteArray());
     }
 
     public static String getBip322SignatureFromPsbt(ScriptType scriptType, PSBT signedPsbt, ECKey pubKey) {
@@ -100,19 +105,28 @@ public class Bip322 {
         TransactionWitness witness = psbtInput.isTaproot() ? new TransactionWitness(finalizeTransaction, signature) : new TransactionWitness(finalizeTransaction, pubKey, signature);
         TransactionInput finalizedTxInput = finalizeTransaction.addInput(Sha256Hash.ZERO_HASH, 0, scriptSig, witness);
 
-        return Base64.getEncoder().encodeToString(finalizedTxInput.getWitness().toByteArray());
+        return SIMPLE_PREFIX + Base64.getEncoder().encodeToString(finalizedTxInput.getWitness().toByteArray());
     }
 
     public static boolean verifyMessageBip322(ScriptType scriptType, Address address, String message, String signatureBase64) throws SignatureException {
         checkScriptType(scriptType);
 
-        if(signatureBase64.trim().isEmpty()) {
+        String trimmed = signatureBase64.trim();
+        if(trimmed.isEmpty()) {
             throw new SignatureException("Provided signature is empty.");
+        }
+
+        if(trimmed.startsWith(FULL_PREFIX) || trimmed.startsWith(FULL_POF_PREFIX)) {
+            throw new SignatureException("Only the simple BIP322 signature variant is supported.");
+        }
+
+        if(trimmed.startsWith(SIMPLE_PREFIX)) {
+            trimmed = trimmed.substring(SIMPLE_PREFIX.length());
         }
 
         byte[] signatureEncoded;
         try {
-            signatureEncoded = Base64.getDecoder().decode(signatureBase64);
+            signatureEncoded = Base64.getDecoder().decode(trimmed);
         } catch(IllegalArgumentException e) {
             throw new SignatureException("Could not decode base64 signature", e);
         }

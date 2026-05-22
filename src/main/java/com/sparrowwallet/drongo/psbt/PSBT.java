@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -32,6 +33,7 @@ public class PSBT {
     public static final byte PSBT_GLOBAL_TX_MODIFIABLE = 0x06;
     public static final byte PSBT_GLOBAL_SP_ECDH_SHARE = 0x07;
     public static final byte PSBT_GLOBAL_SP_DLEQ = 0x08;
+    public static final byte PSBT_GLOBAL_GENERIC_SIGNED_MESSAGE = 0x09;
     public static final byte PSBT_GLOBAL_VERSION = (byte)0xfb;
     public static final byte PSBT_GLOBAL_PROPRIETARY = (byte)0xfc;
 
@@ -50,6 +52,7 @@ public class PSBT {
 
     private Integer version = null;
     private final Map<ExtendedKey, KeyDerivation> extendedPublicKeys = new LinkedHashMap<>();
+    private String genericSignedMessage = null;
     private final Map<String, String> globalProprietary = new LinkedHashMap<>();
 
     //PSBTv0-only fields
@@ -433,6 +436,11 @@ public class PSBT {
                     SilentPaymentsDLEQProof dleqProof = SilentPaymentsDLEQProof.fromBytes(entry.getData());
                     this.silentPaymentsDLEQProofs.put(proofScanKey, dleqProof);
                     log.debug("PSBT global silent payments DLEQ proof for scan key: " + Utils.bytesToHex(entry.getKeyData()));
+                    break;
+                case PSBT_GLOBAL_GENERIC_SIGNED_MESSAGE:
+                    entry.checkOneByteKey();
+                    this.genericSignedMessage = new String(entry.getData(), StandardCharsets.UTF_8);
+                    log.debug("PSBT global generic signed message: " + genericSignedMessage);
                     break;
                 case PSBT_GLOBAL_PROPRIETARY:
                     globalProprietary.put(Utils.bytesToHex(entry.getKeyData()), Utils.bytesToHex(entry.getData()));
@@ -875,6 +883,10 @@ public class PSBT {
             entries.add(populateEntry(PSBT_GLOBAL_VERSION, null, versionBytes));
         }
 
+        if(genericSignedMessage != null) {
+            entries.add(populateEntry(PSBT_GLOBAL_GENERIC_SIGNED_MESSAGE, null, genericSignedMessage.getBytes(StandardCharsets.UTF_8)));
+        }
+
         for(Map.Entry<String, String> entry : globalProprietary.entrySet()) {
             entries.add(populateEntry(PSBT_GLOBAL_PROPRIETARY, Utils.hexToBytes(entry.getKey()), Utils.hexToBytes(entry.getValue())));
         }
@@ -1224,6 +1236,14 @@ public class PSBT {
 
     public Map<String, String> getGlobalProprietary() {
         return globalProprietary;
+    }
+
+    public String getGenericSignedMessage() {
+        return genericSignedMessage;
+    }
+
+    public void setGenericSignedMessage(String genericSignedMessage) {
+        this.genericSignedMessage = genericSignedMessage;
     }
 
     public String toString() {
