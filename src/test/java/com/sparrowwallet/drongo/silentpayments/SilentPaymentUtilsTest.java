@@ -1,5 +1,6 @@
 package com.sparrowwallet.drongo.silentpayments;
 
+import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.Utils;
 import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.address.P2TRAddress;
@@ -7,6 +8,8 @@ import com.sparrowwallet.drongo.crypto.ECKey;
 import com.sparrowwallet.drongo.policy.Policy;
 import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.protocol.*;
+import com.sparrowwallet.drongo.psbt.PSBT;
+import com.sparrowwallet.drongo.psbt.PSBTInput;
 import com.sparrowwallet.drongo.wallet.*;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -14,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.security.SecureRandom;
 import java.util.*;
 
 public class SilentPaymentUtilsTest {
@@ -990,5 +994,162 @@ public class SilentPaymentUtilsTest {
         List<SilentPaymentScanMatch> matches = SilentPaymentUtils.scanTransactionOutputs(scanPriv, spendPub, Collections.emptySet(), tweakKey, tx.getOutputs());
 
         Assertions.assertTrue(matches.isEmpty());
+    }
+
+    private static final String VERIFY_TEST_SEED = "absent essay fox snake vast pumpkin height crouch silent bulb excuse razor";
+    private static final String VERIFY_TEST_SP_ADDRESS = "sp1qqgste7k9hx0qftg6qmwlkqtwuy6cycyavzmzj85c6qdfhjdpdjtdgqjuexzk6murw56suy3e0rd2cgqvycxttddwsvgxe2usfpxumr70xc9pkqwv";
+    private static final long VERIFY_INPUT_VALUE = 100_000L;
+    private static final long VERIFY_OUTPUT_VALUE = 50_000L;
+
+    @Test
+    public void testVerifyValidPsbt() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        Map<PSBTInput, WalletNode> signingNodes = wallet.getSigningNodes(psbt);
+        Assertions.assertEquals(1, signingNodes.size(), "Wallet should recognize its own input");
+        wallet.computeSilentPaymentOutputs(psbt, signingNodes);
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertEquals(1, verified.size(), "A legitimately constructed SP PSBT must verify");
+        Assertions.assertEquals(SilentPaymentAddress.from(VERIFY_TEST_SP_ADDRESS), verified.values().iterator().next());
+    }
+
+    @Test
+    public void testVerifyRejectsNoProof() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        byte[] arbitraryXOnly = new byte[32];
+        new SecureRandom().nextBytes(arbitraryXOnly);
+        psbt.getPsbtOutputs().get(0).setScript(ScriptType.P2TR.getOutputScript(arbitraryXOnly));
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertTrue(verified.isEmpty(), "Poisoned PSBT without BIP-375 metadata must be rejected");
+    }
+
+    @Test
+    public void testVerifyRejectsForgedShare() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        Map<PSBTInput, WalletNode> signingNodes = wallet.getSigningNodes(psbt);
+        wallet.computeSilentPaymentOutputs(psbt, signingNodes);
+
+        Map.Entry<ECKey, ECKey> shareEntry = psbt.getSilentPaymentsEcdhShares().entrySet().iterator().next();
+        ECKey forged = ECKey.fromPublicOnly(ECKey.fromPrivate(Sha256Hash.hash("forged".getBytes())).getPubKey());
+        psbt.getSilentPaymentsEcdhShares().put(shareEntry.getKey(), forged);
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertTrue(verified.isEmpty(), "Forged ECDH share must fail DLEQ verification");
+    }
+
+    @Test
+    public void testVerifyRejectsMutatedScript() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        Map<PSBTInput, WalletNode> signingNodes = wallet.getSigningNodes(psbt);
+        wallet.computeSilentPaymentOutputs(psbt, signingNodes);
+
+        byte[] mutatedXOnly = new byte[32];
+        new SecureRandom().nextBytes(mutatedXOnly);
+        psbt.getPsbtOutputs().get(0).setScript(ScriptType.P2TR.getOutputScript(mutatedXOnly));
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertTrue(verified.isEmpty(), "Output script that doesn't derive from the claimed SP address must be rejected");
+    }
+
+    @Test
+    public void testVerifyAbortsMidSign() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertTrue(verified.isEmpty(), "Mid-sign PSBT must abort all-or-nothing without persisting");
+    }
+
+    @Test
+    public void testVerifyRejectsForeignInput() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        byte[] foreignXOnly = new byte[32];
+        new SecureRandom().nextBytes(foreignXOnly);
+        Script foreignScript = ScriptType.P2TR.getOutputScript(foreignXOnly);
+        psbt.getPsbtInputs().get(0).setWitnessUtxo(new TransactionOutput(null, VERIFY_INPUT_VALUE, foreignScript));
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertTrue(verified.isEmpty(), "PSBT whose inputs aren't from this wallet must be rejected");
+    }
+
+    @Test
+    public void testVerifyEmptyPsbt() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        primeReceiveNode(wallet, 0);
+
+        Transaction tx = new Transaction();
+        tx.setVersion(2);
+        PSBT psbt = new PSBT(tx);
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertTrue(verified.isEmpty(), "PSBT with no SP outputs returns empty by definition");
+    }
+
+    @Test
+    public void testVerifyRejectsMissingProof() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        Map<PSBTInput, WalletNode> signingNodes = wallet.getSigningNodes(psbt);
+        wallet.computeSilentPaymentOutputs(psbt, signingNodes);
+
+        psbt.getSilentPaymentsDLEQProofs().clear();
+
+        Map<Address, SilentPaymentAddress> verified = wallet.verifySilentPaymentOutputs(psbt);
+        Assertions.assertTrue(verified.isEmpty(), "Missing DLEQ proof must cause rejection");
+    }
+
+    private static Wallet buildVerifyWallet() throws Exception {
+        DeterministicSeed seed = new DeterministicSeed(VERIFY_TEST_SEED, "", 0, DeterministicSeed.Type.BIP39);
+        Wallet wallet = new Wallet();
+        wallet.setPolicyType(PolicyType.SINGLE_HD);
+        wallet.setScriptType(ScriptType.P2WPKH);
+        Keystore keystore = Keystore.fromSeed(seed, PolicyType.SINGLE_HD, ScriptType.P2WPKH.getDefaultDerivation());
+        wallet.getKeystores().add(keystore);
+        wallet.setDefaultPolicy(Policy.getPolicy(PolicyType.SINGLE_HD, ScriptType.P2WPKH, wallet.getKeystores(), 1));
+
+        return wallet;
+    }
+
+    private static WalletNode primeReceiveNode(Wallet wallet, int index) {
+        WalletNode node = new WalletNode(wallet, KeyPurpose.RECEIVE, index);
+        TreeSet<WalletNode> children = new TreeSet<>();
+        children.add(node);
+        wallet.getNode(KeyPurpose.RECEIVE).setChildren(children);
+
+        return node;
+    }
+
+    private static PSBT buildVerifySendingPsbt(WalletNode receiveNode) {
+        Script inputScript = receiveNode.getOutputScript();
+
+        Transaction tx = new Transaction();
+        tx.setVersion(2);
+        tx.addInput(Sha256Hash.wrap("0000000000000000000000000000000000000000000000000000000000000001"), 0, new Script(new byte[0]));
+        tx.addOutput(VERIFY_OUTPUT_VALUE, new Script(new byte[0]));
+
+        PSBT psbt = new PSBT(tx);
+        psbt.getPsbtInputs().get(0).setWitnessUtxo(new TransactionOutput(null, VERIFY_INPUT_VALUE, inputScript));
+        psbt.getPsbtOutputs().get(0).setSilentPaymentAddress(SilentPaymentAddress.from(VERIFY_TEST_SP_ADDRESS));
+
+        return psbt;
     }
 }

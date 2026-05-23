@@ -1815,6 +1815,67 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
         }
     }
 
+    /**
+     * Returns the subset of PSBT_OUT_SP_V0_INFO entries whose claimed silent payment address
+     * actually derives the PSBT output script under BIP-352, as proven by the PSBT's BIP-375
+     * ECDH shares and DLEQ proofs (global or per-input form) against this wallet's input public
+     * keys. Verification uses public keys only and works for both software and hardware keystores.
+     * Returns an empty map if any input is not from this wallet, if BIP-375 metadata is missing
+     * or inconsistent, if any DLEQ proof fails to verify, or if any claimed script does not
+     * match the BIP-352 derivation.
+     */
+    public Map<Address, SilentPaymentAddress> verifySilentPaymentOutputs(PSBT psbt) {
+        Map<Address, SilentPaymentAddress> verified = new LinkedHashMap<>();
+        if(psbt == null) {
+            return verified;
+        }
+
+        List<PSBTOutput> spOutputs = new ArrayList<>();
+        for(PSBTOutput psbtOutput : psbt.getPsbtOutputs()) {
+            if(psbtOutput.getSilentPaymentAddress() == null) {
+                continue;
+            }
+            Script script = psbtOutput.getScript();
+            if(script == null || script.getToAddress() == null) {
+                return verified;
+            }
+            spOutputs.add(psbtOutput);
+        }
+
+        if(spOutputs.isEmpty()) {
+            return verified;
+        }
+
+        try {
+            Map<PSBTInput, WalletNode> signingNodes = getSigningNodes(psbt);
+            if(psbt.getPsbtInputs().size() != signingNodes.size()) {
+                return verified;
+            }
+
+            Map<TransactionInput, ECKey> inputPublicKeys = new LinkedHashMap<>();
+            Transaction transaction = psbt.getTransaction();
+            for(int i = 0; i < psbt.getPsbtInputs().size(); i++) {
+                PSBTInput psbtInput = psbt.getPsbtInputs().get(i);
+                WalletNode node = signingNodes.get(psbtInput);
+                ECKey publicKey = SilentPaymentUtils.getInputPublicKey(node);
+                if(publicKey == null) {
+                    return verified;
+                }
+                inputPublicKeys.put(transaction.getInputs().get(i), publicKey);
+            }
+
+            psbt.validateSilentPayments(inputPublicKeys);
+
+            for(PSBTOutput psbtOutput : spOutputs) {
+                verified.put(psbtOutput.getScript().getToAddress(), psbtOutput.getSilentPaymentAddress());
+            }
+        } catch(Exception e) {
+            return new LinkedHashMap<>();
+        }
+
+        return verified;
+    }
+
     public List<SilentPayment> computeSilentPaymentOutputs(PSBT psbt, Map<PSBTInput, WalletNode> signingNodes) throws InvalidSilentPaymentException {
         List<PSBTOutput> silentOutputs = psbt.getPsbtOutputs().stream().filter(psbtOutput -> psbtOutput.getSilentPaymentAddress() != null).collect(Collectors.toList());
         if(!silentOutputs.isEmpty()) {

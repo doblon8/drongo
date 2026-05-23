@@ -331,6 +331,20 @@ public class SilentPaymentUtils {
         return ECKey.fromPrivate(summedPrivKey);
     }
 
+    public static ECKey getInputPublicKey(WalletNode walletNode) {
+        if(!walletNode.getWallet().canSendSilentPayments()) {
+            return null;
+        }
+
+        ECKey rawKey = walletNode.getPubKey();
+        ECKey publicKey = walletNode.getWallet().getScriptType().getOutputKey(walletNode.getWallet().getPolicyType(), rawKey);
+        if(walletNode.getWallet().getScriptType() == P2TR && publicKey.hasOddYCoord()) {
+            publicKey = publicKey.negate();
+        }
+
+        return publicKey;
+    }
+
     public static ECKey getSummedPublicKey(Collection<ECKey> publicKeys) {
         ECKey summedKey = null;
 
