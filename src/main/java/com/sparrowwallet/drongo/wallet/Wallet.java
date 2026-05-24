@@ -13,6 +13,7 @@ import com.sparrowwallet.drongo.protocol.*;
 import com.sparrowwallet.drongo.psbt.PSBT;
 import com.sparrowwallet.drongo.psbt.PSBTInput;
 import com.sparrowwallet.drongo.psbt.PSBTOutput;
+import com.sparrowwallet.drongo.psbt.PSBTProofException;
 import com.sparrowwallet.drongo.silentpayments.*;
 
 import java.nio.charset.StandardCharsets;
@@ -1878,12 +1879,50 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
 
     public List<SilentPayment> computeSilentPaymentOutputs(PSBT psbt, Map<PSBTInput, WalletNode> signingNodes) throws InvalidSilentPaymentException {
         List<PSBTOutput> silentOutputs = psbt.getPsbtOutputs().stream().filter(psbtOutput -> psbtOutput.getSilentPaymentAddress() != null).collect(Collectors.toList());
-        if(!silentOutputs.isEmpty()) {
-            if(psbt.getPsbtInputs().size() != signingNodes.size()) {
-                throw new InvalidSilentPaymentException("All inputs must be from wallet to calculate silent payment addresses");
-            }
+        if(silentOutputs.isEmpty()) {
+            return Collections.emptyList();
+        }
 
-            List<SilentPayment> silentPayments = silentOutputs.stream()
+        if(psbt.getPsbtInputs().size() != signingNodes.size()) {
+            throw new InvalidSilentPaymentException("All inputs must be from wallet to calculate silent payment addresses");
+        }
+
+        List<PSBTOutput> preComputedOutputs = new ArrayList<>();
+        List<PSBTOutput> computeOutputs = new ArrayList<>();
+        for(PSBTOutput silentOutput : silentOutputs) {
+            Script script = silentOutput.getScript();
+            if(script != null && script.getToAddress() != null) {
+                preComputedOutputs.add(silentOutput);
+            } else {
+                computeOutputs.add(silentOutput);
+            }
+        }
+
+        List<SilentPayment> results = new ArrayList<>();
+
+        if(!preComputedOutputs.isEmpty()) {
+            Map<TransactionInput, ECKey> inputPublicKeys = new LinkedHashMap<>();
+            Transaction transaction = psbt.getTransaction();
+            for(int i = 0; i < psbt.getPsbtInputs().size(); i++) {
+                PSBTInput psbtInput = psbt.getPsbtInputs().get(i);
+                ECKey publicKey = SilentPaymentUtils.getInputPublicKey(signingNodes.get(psbtInput));
+                if(publicKey == null) {
+                    throw new InvalidSilentPaymentException("Cannot derive input public key for silent payment verification");
+                }
+                inputPublicKeys.put(transaction.getInputs().get(i), publicKey);
+            }
+            try {
+                psbt.validateSilentPayments(inputPublicKeys);
+            } catch(PSBTProofException e) {
+                throw new InvalidSilentPaymentException("Silent payment metadata in PSBT failed BIP-375 verification: " + e.getMessage());
+            }
+            for(PSBTOutput silentOutput : preComputedOutputs) {
+                results.add(new SilentPayment(silentOutput.getSilentPaymentAddress(), silentOutput.getScript().getToAddress(), null, silentOutput.getAmount(), false));
+            }
+        }
+
+        if(!computeOutputs.isEmpty()) {
+            List<SilentPayment> silentPayments = computeOutputs.stream()
                     .map(psbtOutput -> new SilentPayment(psbtOutput.getSilentPaymentAddress(), null, psbtOutput.getAmount(), false)).collect(Collectors.toList());
             Map<HashIndex, WalletNode> utxos = signingNodes.keySet().stream()
                     .collect(Collectors.toMap(psbtInput -> new HashIndex(psbtInput.getPrevTxid(), psbtInput.getPrevIndex()), signingNodes::get));
@@ -1893,8 +1932,8 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
                 psbt.getSilentPaymentsDLEQProofs().put(key, ecdhShareAndProof.dleqProof());
             });
 
-            for(int i = 0; i < silentOutputs.size(); i++) {
-                PSBTOutput silentOutput = silentOutputs.get(i);
+            for(int i = 0; i < computeOutputs.size(); i++) {
+                PSBTOutput silentOutput = computeOutputs.get(i);
                 SilentPayment silentPayment = silentPayments.get(i);
                 if(!silentPayment.isAddressComputed()) {
                     throw new InvalidSilentPaymentException("Silent payment address was not calculated");
@@ -1904,10 +1943,10 @@ public class Wallet extends Persistable implements Comparable<Wallet> {
                 silentOutput.setScript(outputScript);
             }
 
-            return silentPayments;
+            results.addAll(silentPayments);
         }
 
-        return Collections.emptyList();
+        return results;
     }
 
     public void finalise(PSBT psbt) {

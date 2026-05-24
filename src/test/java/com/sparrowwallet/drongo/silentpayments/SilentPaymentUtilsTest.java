@@ -1117,6 +1117,39 @@ public class SilentPaymentUtilsTest {
         Assertions.assertTrue(verified.isEmpty(), "Missing DLEQ proof must cause rejection");
     }
 
+    @Test
+    public void testComputeRejectsInjectedSpInfo() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        byte[] baitXOnly = new byte[32];
+        new SecureRandom().nextBytes(baitXOnly);
+        Script baitScript = ScriptType.P2TR.getOutputScript(baitXOnly);
+        psbt.getPsbtOutputs().getFirst().setScript(baitScript);
+
+        Map<PSBTInput, WalletNode> signingNodes = wallet.getSigningNodes(psbt);
+        Assertions.assertThrows(InvalidSilentPaymentException.class, () -> wallet.computeSilentPaymentOutputs(psbt, signingNodes),
+                "Injected PSBT_OUT_SP_V0_INFO without valid BIP-375 proofs must abort signing");
+        Assertions.assertArrayEquals(baitScript.getProgram(), psbt.getPsbtOutputs().get(0).getScript().getProgram(),
+                "Visible output script must not be mutated when SP metadata fails verification");
+    }
+
+    @Test
+    public void testComputePreservesScriptForVerifiedPsbt() throws Exception {
+        Wallet wallet = buildVerifyWallet();
+        WalletNode receiveNode = primeReceiveNode(wallet, 0);
+        PSBT psbt = buildVerifySendingPsbt(receiveNode);
+
+        Map<PSBTInput, WalletNode> signingNodes = wallet.getSigningNodes(psbt);
+        wallet.computeSilentPaymentOutputs(psbt, signingNodes);
+        byte[] computedScript = psbt.getPsbtOutputs().getFirst().getScript().getProgram();
+
+        wallet.computeSilentPaymentOutputs(psbt, signingNodes);
+        Assertions.assertArrayEquals(computedScript, psbt.getPsbtOutputs().getFirst().getScript().getProgram(),
+                "Already-computed and proof-backed SP output script must be preserved by a subsequent compute call");
+    }
+
     private static Wallet buildVerifyWallet() throws Exception {
         DeterministicSeed seed = new DeterministicSeed(VERIFY_TEST_SEED, "", 0, DeterministicSeed.Type.BIP39);
         Wallet wallet = new Wallet();
